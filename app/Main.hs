@@ -2,24 +2,28 @@
 
 module Main where
 
+import Config
 import Control.Monad.IO.Class (liftIO)
 import Page
 import Services
 import Stylesheet
+import System.Environment
 import Web.Scotty
 
 main :: IO ()
-main =
+main = do
+  args <- getArgs
+  config <- decodeConfig $ head args
   scotty 3000 $ do
     get "/" $ do Web.Scotty.html $ page stylesheet
     staticPath "images"
     staticPath "fonts"
     get "/services" $ do
-      services <- liftIO $ fetchServices
+      services <- liftIO $ fetchServices config
       json $ fmap serviceToJson services
     get "/services/:id" $ do
       serviceId <- param "id"
-      service <- liftIO $ fetchService serviceId
+      service <- liftIO $ fetchService config serviceId
       json service
 
 staticPath :: String -> ScottyM ()

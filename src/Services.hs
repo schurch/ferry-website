@@ -16,21 +16,13 @@ module Services
   , serviceToJson
   ) where
 
+import Config
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Logger (runStderrLoggingT)
 import Data.Aeson
 import Database.Persist
 import Database.Persist.MySQL
 import Database.Persist.TH
-
-connectionInfo :: ConnectInfo
-connectionInfo =
-  defaultConnectInfo
-  { connectPort = 3306
-  , connectUser = "root"
-  , connectPassword = "password"
-  , connectDatabase = "ferries"
-  }
 
 share
   [mkPersist sqlSettings, mkMigrate "migrateAll"]
@@ -51,20 +43,20 @@ share
         deriving Show
     |]
 
-fetchServices :: IO ([Entity Service])
-fetchServices =
+fetchServices :: Config -> IO ([Entity Service])
+fetchServices config =
   runStderrLoggingT $
-  withMySQLPool connectionInfo 10 $ \pool ->
+  withMySQLPool (configToConnectionInfo config) 10 $ \pool ->
     liftIO $ do
       flip runSqlPersistMPool pool $ do
         runMigration migrateAll
         services <- selectList [] []
         return services
 
-fetchService :: Int -> IO (Maybe (Entity Service))
-fetchService serviceId =
+fetchService :: Config -> Int -> IO (Maybe (Entity Service))
+fetchService config serviceId =
   runStderrLoggingT $
-  withMySQLPool connectionInfo 10 $ \pool ->
+  withMySQLPool (configToConnectionInfo config) 10 $ \pool ->
     liftIO $ do
       flip runSqlPersistMPool pool $ do
         runMigration migrateAll
@@ -76,9 +68,19 @@ serviceToJson serviceEntity =
   let service = entityVal serviceEntity
   in object
        [ "serviceId" .= serviceServiceId service
-       , "sortOrder" .= serviceSortOrder service
+       , "sort_order" .= serviceSortOrder service
        , "area" .= serviceArea service
        , "route" .= serviceRoute service
        , "status" .= serviceStatus service
        , "updated" .= serviceUpdated service
        ]
+
+configToConnectionInfo :: Config -> ConnectInfo
+configToConnectionInfo config =
+  let databaseConfig' = databaseConfig config
+  in defaultConnectInfo
+     { connectPort = fromInteger (databasePort databaseConfig')
+     , connectUser = (databaseUsername databaseConfig')
+     , connectPassword = (databasePassword databaseConfig')
+     , connectDatabase = (databaseName databaseConfig')
+     }
