@@ -29,6 +29,8 @@ library
                      , monad-logger
                      , aeson
                      , yaml
+                     , time
+                     , old-locale
   default-language:    Haskell2010
 
 executable ferries-website-exe

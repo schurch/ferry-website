@@ -20,11 +20,11 @@ main = do
     staticPath "fonts"
     get "/services" $ do
       services <- liftIO $ fetchServices config
-      json $ fmap serviceToJson services
+      json $ serviceToCompactJson <$> services
     get "/services/:id" $ do
       serviceId <- param "id"
       service <- liftIO $ fetchService config serviceId
-      json service
+      json $ serviceToJson <$> service
 
 staticPath :: String -> ScottyM ()
 staticPath path =

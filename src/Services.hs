@@ -13,6 +13,7 @@ module Services
   ( Service
   , fetchServices
   , fetchService
+  , serviceToCompactJson
   , serviceToJson
   ) where
 
@@ -20,6 +21,8 @@ import Config
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Logger (runStderrLoggingT)
 import Data.Aeson
+import Data.Time.Clock.POSIX
+import Data.Time.Format
 import Database.Persist
 import Database.Persist.MySQL
 import Database.Persist.TH
@@ -63,16 +66,33 @@ fetchService config serviceId =
         service <- getBy $ UniqueServiceId serviceId
         return service
 
-serviceToJson :: Entity Service -> Value
-serviceToJson serviceEntity =
+serviceToCompactJson :: Entity Service -> Value
+serviceToCompactJson serviceEntity =
   let service = entityVal serviceEntity
   in object
-       [ "serviceId" .= serviceServiceId service
+       [ "service_id" .= serviceServiceId service
        , "sort_order" .= serviceSortOrder service
        , "area" .= serviceArea service
        , "route" .= serviceRoute service
        , "status" .= serviceStatus service
-       , "updated" .= serviceUpdated service
+       , "updated" .= formatServiceTime (serviceUpdated service)
+       ]
+
+serviceToJson :: Entity Service -> Value
+serviceToJson serviceEntity =
+  let service = entityVal serviceEntity
+  in object
+       [ "service_id" .= serviceServiceId service
+       , "sort_order" .= serviceSortOrder service
+       , "area" .= serviceArea service
+       , "route" .= serviceRoute service
+       , "status" .= serviceStatus service
+       , "updated" .= formatServiceTime (serviceUpdated service)
+       , "disruption_reason" .= serviceReason service
+       , "disruption_date" .=
+         (formatServiceTime <$> (serviceDisruptionDate service))
+       , "disruption_details" .= serviceDisruptionDetails service
+       , "additional_info" .= serviceAdditionalInfo service
        ]
 
 configToConnectionInfo :: Config -> ConnectInfo
@@ -84,3 +104,10 @@ configToConnectionInfo config =
      , connectPassword = (databasePassword databaseConfig')
      , connectDatabase = (databaseName databaseConfig')
      }
+
+formatServiceTime :: Int -> String
+formatServiceTime epoch =
+  formatTime
+    Data.Time.Format.defaultTimeLocale
+    "%Y-%m-%d %H:%M:%S UTC"
+    (posixSecondsToUTCTime $ realToFrac epoch)
