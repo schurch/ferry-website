@@ -15,6 +15,7 @@ module Services
   , fetchService
   , serviceToCompactJson
   , serviceToJson
+  , ensureStatusNotOutdated
   ) where
 
 import Config
@@ -26,6 +27,25 @@ import Data.Time.Format
 import Database.Persist
 import Database.Persist.MySQL
 import Database.Persist.TH
+
+data ServiceStatus
+  = Normal
+  | Disrupted
+  | Cancelled
+  | Unknown
+
+instance Enum ServiceStatus where
+  toEnum 0 = Normal
+  toEnum 1 = Disrupted
+  toEnum 2 = Cancelled
+  toEnum (-99) = Unknown
+  fromEnum Normal = 0
+  fromEnum Disrupted = 2
+  fromEnum Cancelled = 3
+  fromEnum Unknown = (-99)
+
+updatedMaxAge :: Int
+updatedMaxAge = 60 * 30 -- 30 mins
 
 share
   [mkPersist sqlSettings, mkMigrate "migrateAll"]
@@ -46,7 +66,7 @@ share
         deriving Show
     |]
 
-fetchServices :: Config -> IO ([Entity Service])
+fetchServices :: Config -> IO ([Service])
 fetchServices config =
   runStderrLoggingT $
   withMySQLPool (configToConnectionInfo config) 10 $ \pool ->
@@ -54,9 +74,9 @@ fetchServices config =
       flip runSqlPersistMPool pool $ do
         runMigration migrateAll
         services <- selectList [] []
-        return services
+        return $ entityVal <$> services
 
-fetchService :: Config -> Int -> IO (Maybe (Entity Service))
+fetchService :: Config -> Int -> IO (Maybe (Service))
 fetchService config serviceId =
   runStderrLoggingT $
   withMySQLPool (configToConnectionInfo config) 10 $ \pool ->
@@ -64,36 +84,40 @@ fetchService config serviceId =
       flip runSqlPersistMPool pool $ do
         runMigration migrateAll
         service <- getBy $ UniqueServiceId serviceId
-        return service
+        return $ entityVal <$> service
 
-serviceToCompactJson :: Entity Service -> Value
-serviceToCompactJson serviceEntity =
-  let service = entityVal serviceEntity
-  in object
-       [ "service_id" .= serviceServiceId service
-       , "sort_order" .= serviceSortOrder service
-       , "area" .= serviceArea service
-       , "route" .= serviceRoute service
-       , "status" .= serviceStatus service
-       , "updated" .= formatServiceTime (serviceUpdated service)
-       ]
+serviceToCompactJson :: Service -> Value
+serviceToCompactJson service =
+  object
+    [ "service_id" .= serviceServiceId service
+    , "sort_order" .= serviceSortOrder service
+    , "area" .= serviceArea service
+    , "route" .= serviceRoute service
+    , "status" .= serviceStatus service
+    , "updated" .= formatServiceTime (serviceUpdated service)
+    ]
 
-serviceToJson :: Entity Service -> Value
-serviceToJson serviceEntity =
-  let service = entityVal serviceEntity
-  in object
-       [ "service_id" .= serviceServiceId service
-       , "sort_order" .= serviceSortOrder service
-       , "area" .= serviceArea service
-       , "route" .= serviceRoute service
-       , "status" .= serviceStatus service
-       , "updated" .= formatServiceTime (serviceUpdated service)
-       , "disruption_reason" .= serviceReason service
-       , "disruption_date" .=
-         (formatServiceTime <$> (serviceDisruptionDate service))
-       , "disruption_details" .= serviceDisruptionDetails service
-       , "additional_info" .= serviceAdditionalInfo service
-       ]
+serviceToJson :: Service -> Value
+serviceToJson service =
+  object
+    [ "service_id" .= serviceServiceId service
+    , "sort_order" .= serviceSortOrder service
+    , "area" .= serviceArea service
+    , "route" .= serviceRoute service
+    , "status" .= serviceStatus service
+    , "updated" .= formatServiceTime (serviceUpdated service)
+    , "disruption_reason" .= serviceReason service
+    , "disruption_date" .=
+      (formatServiceTime <$> (serviceDisruptionDate service))
+    , "disruption_details" .= serviceDisruptionDetails service
+    , "additional_info" .= serviceAdditionalInfo service
+    ]
+
+ensureStatusNotOutdated :: Int -> Service -> Service
+ensureStatusNotOutdated currentEpoch service =
+  if currentEpoch - (serviceUpdated service) > updatedMaxAge
+    then service {serviceStatus = fromEnum Unknown}
+    else service
 
 configToConnectionInfo :: Config -> ConnectInfo
 configToConnectionInfo config =

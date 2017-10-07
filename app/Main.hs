@@ -4,6 +4,7 @@ module Main where
 
 import Config
 import Control.Monad.IO.Class (liftIO)
+import Data.Time.Clock.POSIX
 import Page
 import Services
 import Stylesheet
@@ -20,11 +21,13 @@ main = do
     staticPath "fonts"
     get "/services" $ do
       services <- liftIO $ fetchServices config
-      json $ serviceToCompactJson <$> services
+      servicesCorrectStatus <- liftIO $ correctStatus services
+      json $ serviceToCompactJson <$> servicesCorrectStatus
     get "/services/:id" $ do
       serviceId <- param "id"
       service <- liftIO $ fetchService config serviceId
-      json $ serviceToJson <$> service
+      serviceCorrectStatus <- liftIO $ correctStatus service
+      json $ serviceToJson <$> serviceCorrectStatus
 
 staticPath :: String -> ScottyM ()
 staticPath path =
@@ -32,3 +35,10 @@ staticPath path =
   in get routePattern $ do
        fileName <- param "file"
        file $ "./" ++ path ++ "/" ++ fileName
+
+correctStatus
+  :: (Functor a)
+  => a Service -> IO (a Service)
+correctStatus a = do
+  currentTime <- round <$> getPOSIXTime
+  return $ (ensureStatusNotOutdated currentTime) <$> a
