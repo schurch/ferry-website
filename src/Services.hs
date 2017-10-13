@@ -74,7 +74,8 @@ fetchServices config =
       flip runSqlPersistMPool pool $ do
         runMigration migrateAll
         services <- selectList [] []
-        return $ entityVal <$> services
+        time <- liftIO $ round <$> getPOSIXTime
+        return $ (sanitizeService time) <$> services
 
 fetchService :: Config -> Int -> IO (Maybe (Service))
 fetchService config serviceId =
@@ -84,8 +85,10 @@ fetchService config serviceId =
       flip runSqlPersistMPool pool $ do
         runMigration migrateAll
         service <- getBy $ UniqueServiceId serviceId
-        return $ entityVal <$> service
+        time <- liftIO $ round <$> getPOSIXTime
+        return $ (sanitizeService time) <$> service
 
+-- Json formatters
 serviceToCompactJson :: Service -> Value
 serviceToCompactJson service =
   object
@@ -113,11 +116,29 @@ serviceToJson service =
     , "additional_info" .= serviceAdditionalInfo service
     ]
 
+-- Helpers
+sanitizeService :: Int -> Entity Service -> Service
+sanitizeService currentTime =
+  sanitizeDisruptionDate . (ensureStatusNotOutdated currentTime) . entityVal
+
 ensureStatusNotOutdated :: Int -> Service -> Service
 ensureStatusNotOutdated currentEpoch service =
   if currentEpoch - (serviceUpdated service) > updatedMaxAge
     then service {serviceStatus = fromEnum Unknown}
     else service
+
+sanitizeDisruptionDate :: Service -> Service
+sanitizeDisruptionDate service
+  | (serviceDisruptionDate service) == Just 0 =
+    service {serviceDisruptionDate = Nothing}
+  | otherwise = service
+
+formatServiceTime :: Int -> String
+formatServiceTime epoch =
+  formatTime
+    Data.Time.Format.defaultTimeLocale
+    "%Y-%m-%d %H:%M:%S UTC"
+    (posixSecondsToUTCTime $ realToFrac epoch)
 
 configToConnectionInfo :: Config -> ConnectInfo
 configToConnectionInfo config =
@@ -128,10 +149,3 @@ configToConnectionInfo config =
      , connectPassword = (databasePassword databaseConfig')
      , connectDatabase = (databaseName databaseConfig')
      }
-
-formatServiceTime :: Int -> String
-formatServiceTime epoch =
-  formatTime
-    Data.Time.Format.defaultTimeLocale
-    "%Y-%m-%d %H:%M:%S UTC"
-    (posixSecondsToUTCTime $ realToFrac epoch)
